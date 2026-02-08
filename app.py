@@ -226,4 +226,5 @@ def main():
         else:
             st.warning("Nenhum sinal semanal encontrado.")
 if __name__ == "__main__":
-    executar()
+    main()
+    
