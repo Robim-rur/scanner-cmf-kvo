@@ -4,10 +4,10 @@ import yfinance as yf
 import pandas_ta as ta
 
 # =====================================================
-# CONFIGURAÇÃO DA PÁGINA
+# CONFIG
 # =====================================================
 st.set_page_config(
-    page_title="Scanner B3 – Diário autorizado pelo Semanal + Semanal OBV",
+    page_title="Scanner B3 – CMF e KVO (Diário e Semanal)",
     layout="wide"
 )
 
@@ -46,138 +46,129 @@ etfs_fiis_24 = [
 
 ativos_scan = sorted(set(acoes_100 + bdrs_50 + etfs_fiis_24))
 
+
 # =====================================================
-# AUTORIZAÇÃO SEMANAL (REGIME)
+# FILTRO DE TENDÊNCIA (GENÉRICO)
+# timeframe = "D" ou "W"
 # =====================================================
-def autorizado_semanal(df):
+def filtros_tendencia(df, timeframe):
 
     if df is None or len(df) < 80:
-        return False
+        return None
 
     df = df.copy()
 
     df["EMA69"] = ta.ema(df["Close"], length=69)
+    dmi = ta.adx(df["High"], df["Low"], df["Close"], length=14)
+    df = pd.concat([df, dmi], axis=1)
 
-    adx = ta.adx(df["High"], df["Low"], df["Close"], length=14)
-    df = pd.concat([df, adx], axis=1)
+    # candle de referência
+    idx = -1 if timeframe == "D" else -2
 
-    # candle fechado
-    idx = -2
-
-    # tendência
-    if df["EMA69"].iloc[idx] <= df["EMA69"].iloc[idx - 1]:
-        return False
-
-    # preço acima da média
+    # tendência de alta
     if df["Close"].iloc[idx] <= df["EMA69"].iloc[idx]:
-        return False
+        return None
 
-    # direção
+    if df["EMA69"].iloc[idx] <= df["EMA69"].iloc[idx - 1]:
+        return None
+
+    # direção obrigatória (regra do seu setup)
     if df["DMP_14"].iloc[idx] <= df["DMN_14"].iloc[idx]:
-        return False
+        return None
 
-    # força mínima
-    if df["ADX_14"].iloc[idx] < 15:
-        return False
-
-    return True
+    return df
 
 
 # =====================================================
-# SETUP DIÁRIO – 123 / INSIDE (gatilho)
+# CMF – DIÁRIO
 # =====================================================
-def procurar_setup_diario(df):
+def setup_cmf_diario(df):
 
-    if df is None or len(df) < 80:
+    df = filtros_tendencia(df, "D")
+    if df is None:
         return None
 
-    df = df.copy()
-    df["EMA69"] = ta.ema(df["Close"], length=69)
+    df["CMF"] = ta.cmf(df["High"], df["Low"], df["Close"], df["Volume"], length=20)
 
-    # candle fechado
-    preco_fechamento = df["Close"].iloc[-1]
-
-    # filtro de tendência diária
-    if df["EMA69"].iloc[-1] <= df["EMA69"].iloc[-2]:
-        return None
-
-    for i in range(-6, -1):
-
-        c1 = df.iloc[i - 2]
-        c2 = df.iloc[i - 1]
-        c3 = df.iloc[i]
-
-        is_123 = c2["Low"] < c1["Low"] and c3["Low"] > c2["Low"]
-        is_inside = c3["High"] <= c2["High"] and c3["Low"] >= c2["Low"]
-
-        if is_123 or is_inside:
-
-            entrada = round(max(c2["High"], c3["High"]), 2)
-            stop = round(c2["Low"], 2)
-
-            return {
-                "Setup": "Diário 123 / Inside",
-                "Preço Fechamento": round(preco_fechamento, 2),
-                "Entrada Técnica": entrada,
-                "Stop Técnico": stop
-            }
+    if df["CMF"].iloc[-2] < 0 and df["CMF"].iloc[-1] > 0:
+        return {
+            "Setup": "CMF Diário",
+            "Preço fechamento": round(df["Close"].iloc[-1], 2),
+            "Entrada": "Abertura do próximo pregão"
+        }
 
     return None
 
 
 # =====================================================
-# SETUP SEMANAL OPERACIONAL – OBV
+# KVO – DIÁRIO
 # =====================================================
-def procurar_setup_semanal_obv(df):
+def setup_kvo_diario(df):
 
-    if df is None or len(df) < 80:
+    df = filtros_tendencia(df, "D")
+    if df is None:
         return None
 
-    df = df.copy()
+    kvo = ta.kvo(df["High"], df["Low"], df["Close"], df["Volume"])
+    df = pd.concat([df, kvo], axis=1)
 
-    df["EMA69"] = ta.ema(df["Close"], length=69)
+    kvo_col = [c for c in df.columns if c.startswith("KVO_") and "s" not in c.lower()][0]
+    sig_col = [c for c in df.columns if c.startswith("KVOs_")][0]
 
-    df["OBV"] = ta.obv(df["Close"], df["Volume"])
-    df["OBV_EMA21"] = ta.ema(df["OBV"], length=21)
+    if df[kvo_col].iloc[-2] <= df[sig_col].iloc[-2] and df[kvo_col].iloc[-1] > df[sig_col].iloc[-1]:
+        return {
+            "Setup": "KVO Diário",
+            "Preço fechamento": round(df["Close"].iloc[-1], 2),
+            "Entrada": "Abertura do próximo pregão"
+        }
 
-    idx = -2  # candle fechado
+    return None
 
-    # tendência
-    if df["EMA69"].iloc[idx] <= df["EMA69"].iloc[idx - 1]:
+
+# =====================================================
+# CMF – SEMANAL
+# =====================================================
+def setup_cmf_semanal(df):
+
+    df = filtros_tendencia(df, "W")
+    if df is None:
         return None
 
-    if df["Close"].iloc[idx] <= df["EMA69"].iloc[idx]:
+    df["CMF"] = ta.cmf(df["High"], df["Low"], df["Close"], df["Volume"], length=20)
+
+    if df["CMF"].iloc[-3] < 0 and df["CMF"].iloc[-2] > 0:
+        return {
+            "Setup": "CMF Semanal",
+            "Preço fechamento": round(df["Close"].iloc[-2], 2),
+            "Entrada": "Abertura do próximo pregão"
+        }
+
+    return None
+
+
+# =====================================================
+# KVO – SEMANAL
+# =====================================================
+def setup_kvo_semanal(df):
+
+    df = filtros_tendencia(df, "W")
+    if df is None:
         return None
 
-    # fluxo
-    if df["OBV"].iloc[idx] <= df["OBV_EMA21"].iloc[idx]:
-        return None
+    kvo = ta.kvo(df["High"], df["Low"], df["Close"], df["Volume"])
+    df = pd.concat([df, kvo], axis=1)
 
-    # rompimento das máximas das últimas 10 semanas (anteriores)
-    max_10 = df["High"].rolling(10).max().iloc[idx - 1]
+    kvo_col = [c for c in df.columns if c.startswith("KVO_") and "s" not in c.lower()][0]
+    sig_col = [c for c in df.columns if c.startswith("KVOs_")][0]
 
-    close = df["Close"].iloc[idx]
-    high = df["High"].iloc[idx]
-    low = df["Low"].iloc[idx]
+    if df[kvo_col].iloc[-3] <= df[sig_col].iloc[-3] and df[kvo_col].iloc[-2] > df[sig_col].iloc[-2]:
+        return {
+            "Setup": "KVO Semanal",
+            "Preço fechamento": round(df["Close"].iloc[-2], 2),
+            "Entrada": "Abertura do próximo pregão"
+        }
 
-    if close <= max_10:
-        return None
-
-    # fechamento na metade superior do candle
-    range_candle = high - low
-    if range_candle == 0:
-        return None
-
-    pos = (close - low) / range_candle
-
-    if pos < 0.5:
-        return None
-
-    return {
-        "Setup": "Semanal OBV",
-        "Preço Fechamento": round(close, 2),
-        "Rompimento": round(max_10, 2)
-    }
+    return None
 
 
 # =====================================================
@@ -185,14 +176,14 @@ def procurar_setup_semanal_obv(df):
 # =====================================================
 def executar():
 
-    st.title("📈 Scanner B3 – Diário autorizado pelo Semanal + Semanal OBV")
+    st.title("📊 Scanner – CMF e KVO (Entradas Diárias e Semanais)")
 
-    st.write(f"Ativos monitorados: {len(ativos_scan)}")
+    st.write(f"Ativos monitorados: **{len(ativos_scan)}**")
 
     if st.button("🔍 Escanear"):
 
-        resultados_diario = []
-        resultados_semanal_obv = []
+        res_diario = []
+        res_semanal = []
 
         progress = st.progress(0)
 
@@ -215,49 +206,52 @@ def executar():
         for i, ativo in enumerate(ativos_scan):
 
             try:
-                df_w = dados_semanais[ativo].dropna()
-                autorizado = autorizado_semanal(df_w)
+                df_d = dados_diarios[ativo].dropna()
+
+                r1 = setup_cmf_diario(df_d)
+                if r1:
+                    r1["Ativo"] = ativo.replace(".SA", "")
+                    res_diario.append(r1)
+
+                r2 = setup_kvo_diario(df_d)
+                if r2:
+                    r2["Ativo"] = ativo.replace(".SA", "")
+                    res_diario.append(r2)
+
             except:
-                autorizado = False
+                pass
 
-            # diário só aparece se semanal autorizar
-            if autorizado:
-                try:
-                    df_d = dados_diarios[ativo].dropna()
-                    res_d = procurar_setup_diario(df_d)
-
-                    if res_d:
-                        res_d["Ativo"] = ativo.replace(".SA", "")
-                        resultados_diario.append(res_d)
-                except:
-                    pass
-
-            # semanal operacional independente
             try:
-                df_w2 = dados_semanais[ativo].dropna()
-                res_obv = procurar_setup_semanal_obv(df_w2)
+                df_w = dados_semanais[ativo].dropna()
 
-                if res_obv:
-                    res_obv["Ativo"] = ativo.replace(".SA", "")
-                    resultados_semanal_obv.append(res_obv)
+                r3 = setup_cmf_semanal(df_w)
+                if r3:
+                    r3["Ativo"] = ativo.replace(".SA", "")
+                    res_semanal.append(r3)
+
+                r4 = setup_kvo_semanal(df_w)
+                if r4:
+                    r4["Ativo"] = ativo.replace(".SA", "")
+                    res_semanal.append(r4)
+
             except:
                 pass
 
             progress.progress((i + 1) / len(ativos_scan))
 
-        st.subheader("📌 Entradas no gráfico diário (autorizadas pelo semanal)")
+        st.subheader("📌 Entradas no gráfico diário")
 
-        if resultados_diario:
-            st.dataframe(pd.DataFrame(resultados_diario), use_container_width=True)
+        if res_diario:
+            st.dataframe(pd.DataFrame(res_diario), use_container_width=True)
         else:
-            st.warning("Nenhum sinal diário autorizado pelo semanal.")
+            st.warning("Nenhum sinal diário encontrado.")
 
-        st.subheader("📌 Entradas no gráfico semanal – Setup OBV")
+        st.subheader("📌 Entradas no gráfico semanal")
 
-        if resultados_semanal_obv:
-            st.dataframe(pd.DataFrame(resultados_semanal_obv), use_container_width=True)
+        if res_semanal:
+            st.dataframe(pd.DataFrame(res_semanal), use_container_width=True)
         else:
-            st.warning("Nenhum sinal no setup semanal OBV.")
+            st.warning("Nenhum sinal semanal encontrado.")
 
 
 if __name__ == "__main__":
