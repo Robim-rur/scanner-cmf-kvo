@@ -7,7 +7,7 @@ import pandas_ta as ta
 # CONFIG
 # =====================================================
 st.set_page_config(
-    page_title="Scanner B3 – CMF e KVO (Diário e Semanal)",
+    page_title="Scanner B3 – CMF e KVO (Diário autorizado pelo Semanal + Semanal)",
     layout="wide"
 )
 
@@ -48,13 +48,9 @@ ativos_scan = sorted(set(acoes_100 + bdrs_50 + etfs_fiis_24))
 
 
 # =====================================================
-# FILTRO DE TENDÊNCIA (GENÉRICO)
-# timeframe = "D" ou "W"
+# FILTRO DE TENDÊNCIA (seu padrão)
 # =====================================================
-def filtros_tendencia(df, timeframe):
-
-    if df is None or len(df) < 80:
-        return None
+def filtros_tendencia(df):
 
     df = df.copy()
 
@@ -62,18 +58,16 @@ def filtros_tendencia(df, timeframe):
     dmi = ta.adx(df["High"], df["Low"], df["Close"], length=14)
     df = pd.concat([df, dmi], axis=1)
 
-    # candle de referência
-    idx = -1 if timeframe == "D" else -2
-
-    # tendência de alta
-    if df["Close"].iloc[idx] <= df["EMA69"].iloc[idx]:
+    if len(df) < 80:
         return None
 
-    if df["EMA69"].iloc[idx] <= df["EMA69"].iloc[idx - 1]:
+    if df["Close"].iloc[-1] <= df["EMA69"].iloc[-1]:
         return None
 
-    # direção obrigatória (regra do seu setup)
-    if df["DMP_14"].iloc[idx] <= df["DMN_14"].iloc[idx]:
+    if df["EMA69"].iloc[-1] <= df["EMA69"].iloc[-2]:
+        return None
+
+    if df["DMP_14"].iloc[-1] <= df["DMN_14"].iloc[-1]:
         return None
 
     return df
@@ -84,20 +78,16 @@ def filtros_tendencia(df, timeframe):
 # =====================================================
 def setup_cmf_diario(df):
 
-    df = filtros_tendencia(df, "D")
+    df = filtros_tendencia(df)
     if df is None:
         return None
 
     df["CMF"] = ta.cmf(df["High"], df["Low"], df["Close"], df["Volume"], length=20)
 
     if df["CMF"].iloc[-2] < 0 and df["CMF"].iloc[-1] > 0:
-        return {
-            "Setup": "CMF Diário",
-            "Preço fechamento": round(df["Close"].iloc[-1], 2),
-            "Entrada": "Abertura do próximo pregão"
-        }
+        return True
 
-    return None
+    return False
 
 
 # =====================================================
@@ -105,7 +95,7 @@ def setup_cmf_diario(df):
 # =====================================================
 def setup_kvo_diario(df):
 
-    df = filtros_tendencia(df, "D")
+    df = filtros_tendencia(df)
     if df is None:
         return None
 
@@ -116,13 +106,9 @@ def setup_kvo_diario(df):
     sig_col = [c for c in df.columns if c.startswith("KVOs_")][0]
 
     if df[kvo_col].iloc[-2] <= df[sig_col].iloc[-2] and df[kvo_col].iloc[-1] > df[sig_col].iloc[-1]:
-        return {
-            "Setup": "KVO Diário",
-            "Preço fechamento": round(df["Close"].iloc[-1], 2),
-            "Entrada": "Abertura do próximo pregão"
-        }
+        return True
 
-    return None
+    return False
 
 
 # =====================================================
@@ -130,20 +116,16 @@ def setup_kvo_diario(df):
 # =====================================================
 def setup_cmf_semanal(df):
 
-    df = filtros_tendencia(df, "W")
+    df = filtros_tendencia(df)
     if df is None:
-        return None
+        return False
 
     df["CMF"] = ta.cmf(df["High"], df["Low"], df["Close"], df["Volume"], length=20)
 
-    if df["CMF"].iloc[-3] < 0 and df["CMF"].iloc[-2] > 0:
-        return {
-            "Setup": "CMF Semanal",
-            "Preço fechamento": round(df["Close"].iloc[-2], 2),
-            "Entrada": "Abertura do próximo pregão"
-        }
+    if df["CMF"].iloc[-2] < 0 and df["CMF"].iloc[-1] > 0:
+        return True
 
-    return None
+    return False
 
 
 # =====================================================
@@ -151,9 +133,9 @@ def setup_cmf_semanal(df):
 # =====================================================
 def setup_kvo_semanal(df):
 
-    df = filtros_tendencia(df, "W")
+    df = filtros_tendencia(df)
     if df is None:
-        return None
+        return False
 
     kvo = ta.kvo(df["High"], df["Low"], df["Close"], df["Volume"])
     df = pd.concat([df, kvo], axis=1)
@@ -161,14 +143,10 @@ def setup_kvo_semanal(df):
     kvo_col = [c for c in df.columns if c.startswith("KVO_") and "s" not in c.lower()][0]
     sig_col = [c for c in df.columns if c.startswith("KVOs_")][0]
 
-    if df[kvo_col].iloc[-3] <= df[sig_col].iloc[-3] and df[kvo_col].iloc[-2] > df[sig_col].iloc[-2]:
-        return {
-            "Setup": "KVO Semanal",
-            "Preço fechamento": round(df["Close"].iloc[-2], 2),
-            "Entrada": "Abertura do próximo pregão"
-        }
+    if df[kvo_col].iloc[-2] <= df[sig_col].iloc[-2] and df[kvo_col].iloc[-1] > df[sig_col].iloc[-1]:
+        return True
 
-    return None
+    return False
 
 
 # =====================================================
@@ -176,7 +154,7 @@ def setup_kvo_semanal(df):
 # =====================================================
 def executar():
 
-    st.title("📊 Scanner – CMF e KVO (Entradas Diárias e Semanais)")
+    st.title("📊 Scanner – CMF e KVO (Diário autorizado pelo Semanal + Semanal)")
 
     st.write(f"Ativos monitorados: **{len(ativos_scan)}**")
 
@@ -207,39 +185,51 @@ def executar():
 
             try:
                 df_d = dados_diarios[ativo].dropna()
-
-                r1 = setup_cmf_diario(df_d)
-                if r1:
-                    r1["Ativo"] = ativo.replace(".SA", "")
-                    res_diario.append(r1)
-
-                r2 = setup_kvo_diario(df_d)
-                if r2:
-                    r2["Ativo"] = ativo.replace(".SA", "")
-                    res_diario.append(r2)
-
-            except:
-                pass
-
-            try:
                 df_w = dados_semanais[ativo].dropna()
 
-                r3 = setup_cmf_semanal(df_w)
-                if r3:
-                    r3["Ativo"] = ativo.replace(".SA", "")
-                    res_semanal.append(r3)
+                # autorização semanal (regime)
+                autorizado_semanal = filtros_tendencia(df_w) is not None
 
-                r4 = setup_kvo_semanal(df_w)
-                if r4:
-                    r4["Ativo"] = ativo.replace(".SA", "")
-                    res_semanal.append(r4)
+                if autorizado_semanal:
+
+                    if setup_cmf_diario(df_d):
+                        res_diario.append({
+                            "Ativo": ativo.replace(".SA", ""),
+                            "Setup": "CMF Diário",
+                            "Preço fechamento": round(df_d["Close"].iloc[-1], 2),
+                            "Entrada": "Abertura do próximo pregão"
+                        })
+
+                    if setup_kvo_diario(df_d):
+                        res_diario.append({
+                            "Ativo": ativo.replace(".SA", ""),
+                            "Setup": "KVO Diário",
+                            "Preço fechamento": round(df_d["Close"].iloc[-1], 2),
+                            "Entrada": "Abertura do próximo pregão"
+                        })
+
+                if setup_cmf_semanal(df_w):
+                    res_semanal.append({
+                        "Ativo": ativo.replace(".SA", ""),
+                        "Setup": "CMF Semanal",
+                        "Preço fechamento": round(df_w["Close"].iloc[-1], 2),
+                        "Entrada": "Abertura da próxima semana"
+                    })
+
+                if setup_kvo_semanal(df_w):
+                    res_semanal.append({
+                        "Ativo": ativo.replace(".SA", ""),
+                        "Setup": "KVO Semanal",
+                        "Preço fechamento": round(df_w["Close"].iloc[-1], 2),
+                        "Entrada": "Abertura da próxima semana"
+                    })
 
             except:
                 pass
 
             progress.progress((i + 1) / len(ativos_scan))
 
-        st.subheader("📌 Entradas no gráfico diário")
+        st.subheader("📌 Entradas no gráfico diário (autorizadas pelo semanal)")
 
         if res_diario:
             st.dataframe(pd.DataFrame(res_diario), use_container_width=True)
@@ -256,3 +246,4 @@ def executar():
 
 if __name__ == "__main__":
     executar()
+
