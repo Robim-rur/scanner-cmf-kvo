@@ -225,7 +225,5 @@ def main():
             st.dataframe(pd.DataFrame(res_semanal), use_container_width=True)
         else:
             st.warning("Nenhum sinal semanal encontrado.")
-
-
 if __name__ == "__main__":
     executar()
