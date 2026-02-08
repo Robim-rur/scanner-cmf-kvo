@@ -57,8 +57,8 @@ def filtro_regime_semanal(df):
     df = df.copy()
 
     df["EMA69"] = ta.ema(df["Close"], length=69)
-    adx = ta.adx(df["High"], df["Low"], df["Close"], length=14)
-    df = pd.concat([df, adx], axis=1)
+    dmi = ta.adx(df["High"], df["Low"], df["Close"], length=14)
+    df = pd.concat([df, dmi], axis=1)
 
     if df["Close"].iloc[-1] <= df["EMA69"].iloc[-1]:
         return False
@@ -67,9 +67,6 @@ def filtro_regime_semanal(df):
         return False
 
     if df["DMP_14"].iloc[-1] <= df["DMN_14"].iloc[-1]:
-        return False
-
-    if df["ADX_14"].iloc[-1] < 18:
         return False
 
     return True
