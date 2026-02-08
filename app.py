@@ -3,251 +3,245 @@ import pandas as pd
 import yfinance as yf
 import pandas_ta as ta
 
-# =====================================================
+
+# ======================================================
 # CONFIG
-# =====================================================
-st.set_page_config(
-    page_title="Scanner B3 – CMF e KVO (Diário e Semanal)",
-    layout="wide"
-)
+# ======================================================
 
-# =====================================================
-# LISTAS DE ATIVOS (as mesmas do seu app)
-# =====================================================
-acoes_100 = [
-    "RRRP3.SA","ALOS3.SA","ALPA4.SA","ABEV3.SA","ARZZ3.SA","ASAI3.SA","AZUL4.SA","B3SA3.SA","BBAS3.SA","BBDC3.SA",
-    "BBDC4.SA","BBSE3.SA","BEEF3.SA","BPAC11.SA","BRAP4.SA","BRFS3.SA","BRKM5.SA","CCRO3.SA","CMIG4.SA","CMIN3.SA",
-    "COGN3.SA","CPFE3.SA","CPLE6.SA","CRFB3.SA","CSAN3.SA","CSNA3.SA","CYRE3.SA","DXCO3.SA","EGIE3.SA","ELET3.SA",
-    "ELET6.SA","EMBR3.SA","ENEV3.SA","ENGI11.SA","EQTL3.SA","EZTC3.SA","FLRY3.SA","GGBR4.SA","GOAU4.SA","GOLL4.SA",
-    "HAPV3.SA","HYPE3.SA","ITSA4.SA","ITUB4.SA","JBSS3.SA","KLBN11.SA","LREN3.SA","LWSA3.SA","MGLU3.SA","MRFG3.SA",
-    "MRVE3.SA","MULT3.SA","NTCO3.SA","PETR3.SA","PETR4.SA","PRIO3.SA","RADL3.SA","RAIL3.SA","RAIZ4.SA","RENT3.SA",
-    "RECV3.SA","SANB11.SA","SBSP3.SA","SLCE3.SA","SMTO3.SA","SUZB3.SA","TAEE11.SA","TIMS3.SA","TOTS3.SA","TRPL4.SA",
-    "UGPA3.SA","USIM5.SA","VALE3.SA","VIVT3.SA","VIVA3.SA","WEGE3.SA","YDUQ3.SA","AURE3.SA","BHIA3.SA","CASH3.SA",
-    "CVCB3.SA","DIRR3.SA","ENAT3.SA","GMAT3.SA","IFCM3.SA","INTB3.SA","JHSF3.SA","KEPL3.SA","MOVI3.SA","ORVR3.SA",
-    "PETZ3.SA","PLAS3.SA","POMO4.SA","POSI3.SA","RANI3.SA","RAPT4.SA","STBP3.SA","TEND3.SA","TUPY3.SA",
-    "BRSR6.SA","CXSE3.SA"
-]
-
-bdrs_50 = [
-    "AAPL34.SA","AMZO34.SA","GOGL34.SA","MSFT34.SA","TSLA34.SA","META34.SA","NFLX34.SA","NVDC34.SA","MELI34.SA",
-    "BABA34.SA","DISB34.SA","PYPL34.SA","JNJB34.SA","PGCO34.SA","KOCH34.SA","VISA34.SA","WMTB34.SA","NIKE34.SA",
-    "ADBE34.SA","AVGO34.SA","CSCO34.SA","COST34.SA","CVSH34.SA","GECO34.SA","GSGI34.SA","HDCO34.SA","INTC34.SA",
-    "JPMC34.SA","MAEL34.SA","MCDP34.SA","MDLZ34.SA","MRCK34.SA","ORCL34.SA","PEP334.SA","PFIZ34.SA","PMIC34.SA",
-    "QCOM34.SA","SBUX34.SA","TGTB34.SA","TMOS34.SA","TXN34.SA","UNHH34.SA","UPSB34.SA","VZUA34.SA",
-    "ABTT34.SA","AMGN34.SA","AXPB34.SA","BAOO34.SA","CATP34.SA","HONB34.SA"
-]
-
-etfs_fiis_24 = [
-    "BOVA11.SA","IVVB11.SA","SMAL11.SA","HASH11.SA","GOLD11.SA","GARE11.SA","HGLG11.SA","XPLG11.SA","VILG11.SA",
-    "BRCO11.SA","BTLG11.SA","XPML11.SA","VISC11.SA","HSML11.SA","MALL11.SA","KNRI11.SA","JSRE11.SA","PVBI11.SA",
-    "HGRE11.SA","MXRF11.SA","KNCR11.SA","KNIP11.SA","CPTS11.SA","IRDM11.SA",
-    "DIVO11.SA","NDIV11.SA","SPUB11.SA"
-]
-
-ativos_scan = sorted(set(acoes_100 + bdrs_50 + etfs_fiis_24))
+st.set_page_config(layout="wide")
+st.title("Scanner CMF e KVO – Diário com autorização semanal e Semanal operacional")
 
 
-# =====================================================
-# FUNÇÕES BASE
-# =====================================================
-def filtros_tendencia(df):
+# ======================================================
+# FUNÇÕES DE DADOS
+# ======================================================
 
-    df["EMA69"] = ta.ema(df["Close"], length=69)
-    dmi = ta.adx(df["High"], df["Low"], df["Close"], length=14)
-
-    df = pd.concat([df, dmi], axis=1)
-
-    if len(df) < 80:
+def baixar_dados(ticker, intervalo):
+    df = yf.download(
+        ticker,
+        period="2y",
+        interval=intervalo,
+        progress=False
+    )
+    if df is None or df.empty:
         return None
 
-    if df["Close"].iloc[-1] <= df["EMA69"].iloc[-1]:
-        return None
-
-    if df["EMA69"].iloc[-1] <= df["EMA69"].iloc[-2]:
-        return None
-
-    if df["DMP_14"].iloc[-1] <= df["DMN_14"].iloc[-1]:
-        return None
-
+    df = df.rename(columns=str.title)
     return df
 
 
-# =====================================================
-# SETUP CMF – DIÁRIO
-# =====================================================
-def setup_cmf_diario(df):
+# ======================================================
+# FILTRO DE TENDÊNCIA (seu padrão)
+# ======================================================
 
-    df = filtros_tendencia(df)
-    if df is None:
-        return None
+def filtros_tendencia(df):
 
-    cmf = ta.cmf(df["High"], df["Low"], df["Close"], df["Volume"], length=20)
-    df["CMF"] = cmf
+    if len(df) < 80:
+        return False
 
-    if df["CMF"].iloc[-2] < 0 and df["CMF"].iloc[-1] > 0:
-        return {
-            "Setup": "CMF Diário",
-            "Preço fechamento": round(df["Close"].iloc[-1], 2),
-            "Entrada": "Abertura do próximo pregão"
-        }
+    df = df.copy()
 
-    return None
+    df["EMA69"] = ta.ema(df["Close"], length=69)
+
+    dmi = ta.adx(
+        df["High"],
+        df["Low"],
+        df["Close"],
+        length=14
+    )
+
+    df = pd.concat([df, dmi], axis=1)
+
+    if pd.isna(df["EMA69"].iloc[-1]):
+        return False
+
+    # Close acima da EMA69
+    if df["Close"].iloc[-1] <= df["EMA69"].iloc[-1]:
+        return False
+
+    # EMA69 ascendente
+    if df["EMA69"].iloc[-1] <= df["EMA69"].iloc[-2]:
+        return False
+
+    # D+ acima do D-
+    if df["DMP_14"].iloc[-1] <= df["DMN_14"].iloc[-1]:
+        return False
+
+    return True
 
 
-# =====================================================
-# SETUP KVO – DIÁRIO
-# =====================================================
-def setup_kvo_diario(df):
+# ======================================================
+# AUTORIZAÇÃO SEMANAL PARA ENTRADAS DO DIÁRIO
+# ======================================================
 
-    df = filtros_tendencia(df)
-    if df is None:
-        return None
+def autorizacao_semanal(df_semanal):
 
-    kvo = ta.kvo(df["High"], df["Low"], df["Close"], df["Volume"])
+    return filtros_tendencia(df_semanal)
+
+
+# ======================================================
+# SETUP CMF – diário
+# ======================================================
+
+def setup_cmf(df):
+
+    if len(df) < 30:
+        return False
+
+    df = df.copy()
+
+    df["CMF"] = ta.cmf(
+        df["High"],
+        df["Low"],
+        df["Close"],
+        df["Volume"],
+        length=20
+    )
+
+    # gatilho: cruzamento do CMF para cima da linha zero
+    if (
+        df["CMF"].iloc[-2] <= 0
+        and df["CMF"].iloc[-1] > 0
+    ):
+        return True
+
+    return False
+
+
+# ======================================================
+# SETUP KVO – diário / semanal
+# ======================================================
+
+def setup_kvo(df):
+
+    if len(df) < 40:
+        return False
+
+    df = df.copy()
+
+    kvo = ta.kvo(
+        df["High"],
+        df["Low"],
+        df["Close"],
+        df["Volume"]
+    )
+
     df = pd.concat([df, kvo], axis=1)
 
-    kvo_col = [c for c in df.columns if c.startswith("KVO_") and "s" not in c.lower()][0]
-    sig_col = [c for c in df.columns if c.startswith("KVOs_")][0]
+    if "KVO_34_55_13" not in df.columns:
+        return False
 
-    if df[kvo_col].iloc[-2] <= df[sig_col].iloc[-2] and df[kvo_col].iloc[-1] > df[sig_col].iloc[-1]:
-        return {
-            "Setup": "KVO Diário",
-            "Preço fechamento": round(df["Close"].iloc[-1], 2),
-            "Entrada": "Abertura do próximo pregão"
-        }
+    kvo_col = "KVO_34_55_13"
+    sig_col = "KVOs_34_55_13"
 
-    return None
+    # gatilho: KVO cruza para cima da sua média
+    if (
+        df[kvo_col].iloc[-2] <= df[sig_col].iloc[-2]
+        and df[kvo_col].iloc[-1] > df[sig_col].iloc[-1]
+    ):
+        return True
 
-
-# =====================================================
-# SETUP CMF – SEMANAL
-# =====================================================
-def setup_cmf_semanal(df):
-
-    df = filtros_tendencia(df)
-    if df is None:
-        return None
-
-    cmf = ta.cmf(df["High"], df["Low"], df["Close"], df["Volume"], length=20)
-    df["CMF"] = cmf
-
-    if df["CMF"].iloc[-2] < 0 and df["CMF"].iloc[-1] > 0:
-        return {
-            "Setup": "CMF Semanal",
-            "Preço fechamento": round(df["Close"].iloc[-1], 2),
-            "Entrada": "Abertura da próxima semana"
-        }
-
-    return None
+    return False
 
 
-# =====================================================
-# SETUP KVO – SEMANAL
-# =====================================================
-def setup_kvo_semanal(df):
+# ======================================================
+# INTERFACE
+# ======================================================
 
-    df = filtros_tendencia(df)
-    if df is None:
-        return None
+tickers_txt = st.text_area(
+    "Lista de ativos (um por linha – padrão B3, ex: PETR4.SA)",
+    height=200
+)
 
-    kvo = ta.kvo(df["High"], df["Low"], df["Close"], df["Volume"])
-    df = pd.concat([df, kvo], axis=1)
+if st.button("Rodar scanner"):
 
-    kvo_col = [c for c in df.columns if c.startswith("KVO_") and "s" not in c.lower()][0]
-    sig_col = [c for c in df.columns if c.startswith("KVOs_")][0]
+    tickers = [
+        t.strip().upper()
+        for t in tickers_txt.splitlines()
+        if t.strip()
+    ]
 
-    if df[kvo_col].iloc[-2] <= df[sig_col].iloc[-2] and df[kvo_col].iloc[-1] > df[sig_col].iloc[-1]:
-        return {
-            "Setup": "KVO Semanal",
-            "Preço fechamento": round(df["Close"].iloc[-1], 2),
-            "Entrada": "Abertura da próxima semana"
-        }
+    entradas_diarias = []
+    entradas_semanais = []
 
-    return None
+    for t in tickers:
 
+        try:
 
-# =====================================================
-# EXECUÇÃO
-# =====================================================
-def executar():
+            df_d = baixar_dados(t, "1d")
+            df_w = baixar_dados(t, "1wk")
 
-    st.title("📊 Scanner – CMF e KVO (Entradas Diárias e Semanais)")
+            if df_d is None or df_w is None:
+                continue
 
-    st.write(f"Ativos monitorados: **{len(ativos_scan)}**")
+            df_d = df_d.dropna()
+            df_w = df_w.dropna()
 
-    if st.button("🔍 Escanear"):
+            # -------------------------------
+            # SEMANAL OPERACIONAL
+            # -------------------------------
 
-        res_diario = []
-        res_semanal = []
+            if filtros_tendencia(df_w):
 
-        progress = st.progress(0)
+                if setup_cmf(df_w):
+                    entradas_semanais.append({
+                        "Ativo": t.replace(".SA", ""),
+                        "Setup": "CMF semanal"
+                    })
 
-        dados_diarios = yf.download(
-            ativos_scan,
-            period="1y",
-            interval="1d",
-            group_by="ticker",
-            progress=False
-        )
+                if setup_kvo(df_w):
+                    entradas_semanais.append({
+                        "Ativo": t.replace(".SA", ""),
+                        "Setup": "KVO semanal"
+                    })
 
-        dados_semanais = yf.download(
-            ativos_scan,
-            period="5y",
-            interval="1wk",
-            group_by="ticker",
-            progress=False
-        )
+            # -------------------------------
+            # DIÁRIO COM AUTORIZAÇÃO SEMANAL
+            # -------------------------------
 
-        for i, ativo in enumerate(ativos_scan):
+            if not autorizacao_semanal(df_w):
+                continue
 
-            try:
-                df_d = dados_diarios[ativo].dropna()
+            # aqui entram os gatilhos diários
 
-                r1 = setup_cmf_diario(df_d)
-                if r1:
-                    r1["Ativo"] = ativo.replace(".SA", "")
-                    res_diario.append(r1)
+            if setup_cmf(df_d):
+                entradas_diarias.append({
+                    "Ativo": t.replace(".SA", ""),
+                    "Setup": "CMF diário"
+                })
 
-                r2 = setup_kvo_diario(df_d)
-                if r2:
-                    r2["Ativo"] = ativo.replace(".SA", "")
-                    res_diario.append(r2)
+            if setup_kvo(df_d):
+                entradas_diarias.append({
+                    "Ativo": t.replace(".SA", ""),
+                    "Setup": "KVO diário"
+                })
 
-            except:
-                pass
+        except Exception as e:
+            pass
 
-            try:
-                df_w = dados_semanais[ativo].dropna()
+    col1, col2 = st.columns(2)
 
-                r3 = setup_cmf_semanal(df_w)
-                if r3:
-                    r3["Ativo"] = ativo.replace(".SA", "")
-                    res_semanal.append(r3)
+    with col1:
+        st.subheader("Entradas no gráfico diário (já autorizadas pelo semanal)")
 
-                r4 = setup_kvo_semanal(df_w)
-                if r4:
-                    r4["Ativo"] = ativo.replace(".SA", "")
-                    res_semanal.append(r4)
-
-            except:
-                pass
-
-            progress.progress((i + 1) / len(ativos_scan))
-
-        st.subheader("📌 Entradas no gráfico diário")
-
-        if res_diario:
-            st.dataframe(pd.DataFrame(res_diario), use_container_width=True)
+        if entradas_diarias:
+            st.dataframe(
+                pd.DataFrame(entradas_diarias),
+                use_container_width=True,
+                hide_index=True
+            )
         else:
-            st.warning("Nenhum sinal diário encontrado.")
+            st.info("Nenhum sinal diário autorizado.")
 
-        st.subheader("📌 Entradas no gráfico semanal")
+    with col2:
+        st.subheader("Entradas no gráfico semanal")
 
-        if res_semanal:
-            st.dataframe(pd.DataFrame(res_semanal), use_container_width=True)
+        if entradas_semanais:
+            st.dataframe(
+                pd.DataFrame(entradas_semanais),
+                use_container_width=True,
+                hide_index=True
+            )
         else:
-            st.warning("Nenhum sinal semanal encontrado.")
+            st.info("Nenhum sinal semanal.")
 
-
-if __name__ == "__main__":
-    executar()
