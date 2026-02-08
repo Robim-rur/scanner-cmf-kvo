@@ -7,7 +7,7 @@ import pandas_ta as ta
 # CONFIG
 # =====================================================
 st.set_page_config(
-    page_title="Scanner B3 – CMF e KVO",
+    page_title="Scanner B3 – CMF e KVO (Diário autorizado pelo Semanal + Semanal)",
     layout="wide"
 )
 
@@ -46,25 +46,21 @@ etfs_fiis_24 = [
 
 ativos_scan = sorted(set(acoes_100 + bdrs_50 + etfs_fiis_24))
 
-# =====================================================
-# FILTRO SEMANAL (REGIME)
-# =====================================================
-def filtro_regime_semanal(df_w, data_limite):
 
-    if df_w is None or len(df_w) < 80:
-        return False
-
-    df = df_w[df_w.index <= data_limite].copy()
+# =====================================================
+# FILTRO DE REGIME (sem ADX mínimo)
+# =====================================================
+def regime_compra(df):
 
     if len(df) < 80:
         return False
 
+    df = df.copy()
+
     df["EMA69"] = ta.ema(df["Close"], length=69)
     dmi = ta.adx(df["High"], df["Low"], df["Close"], length=14)
-    df = pd.concat([df, dmi], axis=1)
 
-    if pd.isna(df["EMA69"].iloc[-1]):
-        return False
+    df = pd.concat([df, dmi], axis=1)
 
     if df["Close"].iloc[-1] <= df["EMA69"].iloc[-1]:
         return False
@@ -77,121 +73,80 @@ def filtro_regime_semanal(df_w, data_limite):
 
     return True
 
-# =====================================================
-# CMF DIÁRIO
-# =====================================================
-def setup_cmf_diario(df_d, autorizado):
-
-    if not autorizado:
-        return None
-
-    if df_d is None or len(df_d) < 40:
-        return None
-
-    df = df_d.copy()
-
-    df["CMF"] = ta.cmf(df["High"], df["Low"], df["Close"], df["Volume"], length=20)
-
-    if df["CMF"].iloc[-2] < 0 and df["CMF"].iloc[-1] > 0:
-        return {
-            "Setup": "CMF Diário",
-            "Preço fechamento": round(df["Close"].iloc[-1], 2),
-            "Entrada": "Abertura do próximo pregão"
-        }
-
-    return None
 
 # =====================================================
-# KVO DIÁRIO
+# SETUPS DIÁRIOS (somente gatilho)
 # =====================================================
-def setup_kvo_diario(df_d, autorizado):
+def gatilho_cmf(df):
 
-    if not autorizado:
-        return None
+    cmf = ta.cmf(df["High"], df["Low"], df["Close"], df["Volume"], length=20)
 
-    if df_d is None or len(df_d) < 40:
-        return None
+    if len(cmf) < 2:
+        return False
 
-    df = df_d.copy()
+    return cmf.iloc[-2] < 0 and cmf.iloc[-1] > 0
+
+
+def gatilho_kvo(df):
 
     kvo = ta.kvo(df["High"], df["Low"], df["Close"], df["Volume"])
-    df = pd.concat([df, kvo], axis=1)
 
-    try:
-        kvo_col = [c for c in df.columns if c.startswith("KVO_") and "s" not in c.lower()][0]
-        sig_col = [c for c in df.columns if c.startswith("KVOs_")][0]
-    except:
-        return None
+    if kvo is None or kvo.empty:
+        return False
 
-    if df[kvo_col].iloc[-2] <= df[sig_col].iloc[-2] and df[kvo_col].iloc[-1] > df[sig_col].iloc[-1]:
-        return {
-            "Setup": "KVO Diário",
-            "Preço fechamento": round(df["Close"].iloc[-1], 2),
-            "Entrada": "Abertura do próximo pregão"
-        }
+    kvo_col = [c for c in kvo.columns if c.startswith("KVO_") and "s" not in c.lower()][0]
+    sig_col = [c for c in kvo.columns if c.startswith("KVOs_")][0]
 
-    return None
+    return (
+        kvo[kvo_col].iloc[-2] <= kvo[sig_col].iloc[-2]
+        and kvo[kvo_col].iloc[-1] > kvo[sig_col].iloc[-1]
+    )
+
 
 # =====================================================
-# CMF SEMANAL
+# SETUPS SEMANAIS (independentes)
 # =====================================================
-def setup_cmf_semanal(df_w):
+def setup_semanal_cmf(df):
 
-    if df_w is None or len(df_w) < 40:
-        return None
+    cmf = ta.cmf(df["High"], df["Low"], df["Close"], df["Volume"], length=20)
 
-    df = df_w.copy()
+    if len(cmf) < 2:
+        return False
 
-    df["CMF"] = ta.cmf(df["High"], df["Low"], df["Close"], df["Volume"], length=20)
+    return cmf.iloc[-2] < 0 and cmf.iloc[-1] > 0
 
-    if df["CMF"].iloc[-2] < 0 and df["CMF"].iloc[-1] > 0:
-        return {
-            "Setup": "CMF Semanal",
-            "Preço fechamento": round(df["Close"].iloc[-1], 2),
-            "Entrada": "Abertura da próxima semana"
-        }
 
-    return None
-
-# =====================================================
-# KVO SEMANAL
-# =====================================================
-def setup_kvo_semanal(df_w):
-
-    if df_w is None or len(df_w) < 40:
-        return None
-
-    df = df_w.copy()
+def setup_semanal_kvo(df):
 
     kvo = ta.kvo(df["High"], df["Low"], df["Close"], df["Volume"])
-    df = pd.concat([df, kvo], axis=1)
 
-    try:
-        kvo_col = [c for c in df.columns if c.startswith("KVO_") and "s" not in c.lower()][0]
-        sig_col = [c for c in df.columns if c.startswith("KVOs_")][0]
-    except:
-        return None
+    if kvo is None or kvo.empty:
+        return False
 
-    if df[kvo_col].iloc[-2] <= df[sig_col].iloc[-2] and df[kvo_col].iloc[-1] > df[sig_col].iloc[-1]:
-        return {
-            "Setup": "KVO Semanal",
-            "Preço fechamento": round(df["Close"].iloc[-1], 2),
-            "Entrada": "Abertura da próxima semana"
-        }
+    kvo_col = [c for c in kvo.columns if c.startswith("KVO_") and "s" not in c.lower()][0]
+    sig_col = [c for c in kvo.columns if c.startswith("KVOs_")][0]
 
-    return None
+    return (
+        kvo[kvo_col].iloc[-2] <= kvo[sig_col].iloc[-2]
+        and kvo[kvo_col].iloc[-1] > kvo[sig_col].iloc[-1]
+    )
+
 
 # =====================================================
-# EXECUÇÃO
+# APP
 # =====================================================
-def executar():
+def main():
 
-    st.title("📊 Scanner – CMF e KVO (Diário autorizado pelo semanal)")
+    st.title("📊 Scanner B3 – CMF e KVO")
+
+    st.write(f"Ativos monitorados: {len(ativos_scan)}")
 
     if st.button("🔍 Escanear"):
 
         res_diario = []
         res_semanal = []
+
+        prog = st.progress(0)
 
         dados_diarios = yf.download(
             ativos_scan,
@@ -209,48 +164,62 @@ def executar():
             progress=False
         )
 
-        for ativo in ativos_scan:
+        for i, ativo in enumerate(ativos_scan):
 
             try:
                 df_d = dados_diarios[ativo].dropna()
-                ultima_data_diaria = df_d.index[-1]
-            except:
-                continue
 
-            try:
                 df_w = dados_semanais[ativo].dropna()
-                autorizado = filtro_regime_semanal(df_w, ultima_data_diaria)
+
+                autorizado = regime_compra(df_w)
+
+                if autorizado:
+
+                    if gatilho_cmf(df_d):
+                        res_diario.append({
+                            "Ativo": ativo.replace(".SA", ""),
+                            "Setup": "CMF Diário (autorizado pelo semanal)",
+                            "Preço fechamento": round(df_d["Close"].iloc[-1], 2),
+                            "Entrada": "Abertura do próximo pregão"
+                        })
+
+                    if gatilho_kvo(df_d):
+                        res_diario.append({
+                            "Ativo": ativo.replace(".SA", ""),
+                            "Setup": "KVO Diário (autorizado pelo semanal)",
+                            "Preço fechamento": round(df_d["Close"].iloc[-1], 2),
+                            "Entrada": "Abertura do próximo pregão"
+                        })
+
+                if setup_semanal_cmf(df_w):
+                    res_semanal.append({
+                        "Ativo": ativo.replace(".SA", ""),
+                        "Setup": "CMF Semanal",
+                        "Preço fechamento": round(df_w["Close"].iloc[-1], 2),
+                        "Entrada": "Abertura da próxima semana"
+                    })
+
+                if setup_semanal_kvo(df_w):
+                    res_semanal.append({
+                        "Ativo": ativo.replace(".SA", ""),
+                        "Setup": "KVO Semanal",
+                        "Preço fechamento": round(df_w["Close"].iloc[-1], 2),
+                        "Entrada": "Abertura da próxima semana"
+                    })
+
             except:
-                autorizado = False
+                pass
 
-            r1 = setup_cmf_diario(df_d, autorizado)
-            if r1:
-                r1["Ativo"] = ativo.replace(".SA", "")
-                res_diario.append(r1)
+            prog.progress((i + 1) / len(ativos_scan))
 
-            r2 = setup_kvo_diario(df_d, autorizado)
-            if r2:
-                r2["Ativo"] = ativo.replace(".SA", "")
-                res_diario.append(r2)
-
-            r3 = setup_cmf_semanal(df_w)
-            if r3:
-                r3["Ativo"] = ativo.replace(".SA", "")
-                res_semanal.append(r3)
-
-            r4 = setup_kvo_semanal(df_w)
-            if r4:
-                r4["Ativo"] = ativo.replace(".SA", "")
-                res_semanal.append(r4)
-
-        st.subheader("📌 Sinais no diário (autorizados pelo semanal)")
+        st.subheader("📌 Entradas no gráfico diário (autorizadas pelo semanal)")
 
         if res_diario:
             st.dataframe(pd.DataFrame(res_diario), use_container_width=True)
         else:
             st.warning("Nenhum sinal diário encontrado.")
 
-        st.subheader("📌 Sinais no semanal")
+        st.subheader("📌 Entradas no gráfico semanal")
 
         if res_semanal:
             st.dataframe(pd.DataFrame(res_semanal), use_container_width=True)
@@ -260,4 +229,3 @@ def executar():
 
 if __name__ == "__main__":
     executar()
-
